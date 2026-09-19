@@ -1,0 +1,6 @@
+.env
+data/
+review/
+library/restricted/
+__pycache__/
+.venv/

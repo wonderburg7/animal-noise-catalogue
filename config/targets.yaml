@@ -1,0 +1,37 @@
+xeno_canto:
+  base_query: 'q:">C"'
+  tiers:
+    clean: 'lic:BY'
+    sa:    'lic:BY-SA'
+  max_len_s: 120
+  prefer_no_also: true
+  defaults:
+    max_recordings: 40
+    max_per_species: 2
+
+  queries:
+    # tonal: the melodic core, broad on purpose
+    - { id: song_broad,   role_hint: tonal,   q: 'type:song',
+        max_recordings: 120, max_per_species: 1 }
+
+    # perc: short articulations
+    - { id: call_broad,   role_hint: perc,    q: 'type:call',
+        max_recordings: 80,  max_per_species: 1 }
+    - { id: frog_calls,   role_hint: perc,    q: 'grp:frogs',
+        max_recordings: 60,  max_per_species: 1 }
+    - { id: drumming,     role_hint: perc,    q: 'type:drumming',
+        max_recordings: 25,  max_per_species: 3 }
+
+    # texture
+    - { id: cricket_buzz, role_hint: texture, q: 'grp:grasshoppers',
+        max_recordings: 60,  max_per_species: 1 }
+    - { id: alarm_rasp,   role_hint: texture, q: 'type:"alarm call"',
+        max_recordings: 40,  max_per_species: 1 }
+
+    # ultrasonic: separate processing path, see rules.yaml
+    - { id: bat_echo,     role_hint: perc,    q: 'grp:bats type:echolocation',
+        max_recordings: 30,  max_per_species: 2, ultrasonic: true }
+
+  # No drone query. classify.py already derives drone from any slice
+  # over 2s with tonal_ratio > 0.5, so it emerges from the song pool.
+  # The owl and grebe queries were solving a solved problem.

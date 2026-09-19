@@ -1,0 +1,36 @@
+slice:
+  target_sr: 48000
+  highpass_hz: 80
+  onset:
+    hop_length: 512
+    backtrack: true
+    delta: 0.07
+    wait: 10
+  min_dur_s: 0.03
+  max_dur_s: 8.0
+  pad_s: 0.01
+  fade_ms: 5
+  peak_dbfs: -1.0
+  min_snr_db: 8.0
+  max_clip_ratio: 0.001
+  max_slices_per_file: 12      # stop one long dawn chorus dominating
+
+classify:
+  perc:    { max_dur_s: 0.35, min_onset_sharpness: 0.60 }
+  tonal:   { min_tonal_ratio: 0.60, min_dur_s: 0.10, max_dur_s: 2.0, min_f0_conf: 0.50 }
+  drone:   { min_dur_s: 2.00, min_tonal_ratio: 0.50 }
+  # anything unmatched falls through to texture
+
+ultrasonic:
+  detect_smp_above: 96000
+  method: reinterpret          # relabel the header, never resample
+  target_playback_sr: 44100
+  truncate_source_s: 3.0       # truncate BEFORE slowing, not after
+  highpass_hz: 0               # the 80 Hz filter is meaningless here
+  max_slices_per_file: 40      # a slowed bat pass has many clicks
+  min_snr_db: 4.0              # detector recordings are clean but quiet
+
+export:
+  sr: 44100
+  bit_depth: 16
+  channels: 1
