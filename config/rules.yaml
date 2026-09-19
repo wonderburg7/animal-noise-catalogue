@@ -14,6 +14,10 @@ slice:
   min_snr_db: 8.0
   max_clip_ratio: 0.001
   max_slices_per_file: 12      # stop one long dawn chorus dominating
+  trim_top_db: 30              # silence trim threshold, relative to segment peak
+  over_max_action: truncate    # segment > max_dur_s: truncate | reject
+                               # (a single-onset cricket buzz would otherwise vanish)
+  snr_window_s: 1.5            # context either side of a slice for snr_db
 
 classify:
   perc:    { max_dur_s: 0.35, min_onset_sharpness: 0.60 }
