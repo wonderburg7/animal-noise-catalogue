@@ -132,7 +132,7 @@ def fetch_pool(session, cfg, tier, qd, key):
     return out, lic_skipped
 
 
-def select(cfg, tier, key, session, limit):
+def select(cfg, tier, key, session, limit, bad):
     """Round-robin over queries so a small --limit still spans roles."""
     d = cfg.get("defaults", {})
     pools, lic_skipped = [], 0
@@ -152,7 +152,7 @@ def select(cfg, tier, key, session, limit):
             while p["cands"] and p["n"] < p["max"]:
                 rec = p["cands"].pop(0)
                 sp = f"{rec.get('gen')} {rec.get('sp')}"
-                if rec["id"] in seen or p["sp"].get(sp, 0) >= p["per_sp"]:
+                if rec["id"] in seen or str(rec["id"]) in bad or p["sp"].get(sp, 0) >= p["per_sp"]:
                     continue
                 seen.add(rec["id"])
                 p["sp"][sp] = p["sp"].get(sp, 0) + 1
@@ -188,8 +188,10 @@ def run_fetch(cfg, tier, limit, dry_run, key):
     state = json.loads(STATE.read_text()) if STATE.exists() else {}
     session = requests.Session()
     session.headers["User-Agent"] = USER_AGENT
-    chosen, lic_skipped = select(cfg, tier, key, session, limit)
+    bad = {k for k, v in state.items() if v.get("failed")}
+    chosen, lic_skipped = select(cfg, tier, key, session, limit, bad)
     new = cached = failed = 0
+    state_dirty = False
     new_rows = []
     for qd, rec in chosen:
         sid = str(rec["id"])
@@ -206,6 +208,10 @@ def run_fetch(cfg, tier, limit, dry_run, key):
         except Exception as e:
             failed += 1
             log.exception("download failed XC%s: %s", sid, e)
+            code = getattr(getattr(e, "response", None), "status_code", None)
+            if isinstance(e, ValueError) or code in (403, 404, 410):
+                state[sid] = {"failed": f"{type(e).__name__}: {e}"[:200]}
+                state_dirty = True
             continue
         rel = path.relative_to(ROOT).as_posix()
         row = {"source": "xc", "source_id": sid, "tier": tier, "query_id": qd["id"],
@@ -228,10 +234,11 @@ def run_fetch(cfg, tier, limit, dry_run, key):
             if fresh:
                 w.writeheader()
             w.writerows(new_rows)
+    if not dry_run and (new_rows or state_dirty):
         STATE.parent.mkdir(parents=True, exist_ok=True)
         STATE.write_text(json.dumps(state, indent=1))
     tag = " [dry-run]" if dry_run else ""
-    print(f"fetch_xc: {new} new, {cached} cached, {lic_skipped} skipped (licence), {failed} failed{tag}")
+    print(f"fetch_xc: {new} new, {cached} cached, {lic_skipped} skipped (licence), {failed} failed, {len(bad)} known-bad skipped{tag}")
 
 
 def print_table(rows):
