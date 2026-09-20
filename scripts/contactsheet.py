@@ -39,11 +39,21 @@ def make_filter(expr):
     return lambda r: (r.get(col, "") == val) == (op == "==")
 
 
-def click(sr):
-    n = int(0.040 * sr)
-    t = np.arange(n) / sr
-    env = np.minimum(1, np.minimum(t, t[::-1]) / 0.005)
-    return (0.25 * np.sin(2 * np.pi * 1000 * t) * env).astype(np.float32)
+def bell(sr, freqs, level=0.12, note_s=0.30, step_s=0.22):
+    """Soft sine bell(s): 15 ms attack, exponential decay. One freq per note."""
+    total = int((step_s * (len(freqs) - 1) + note_s) * sr)
+    out = np.zeros(total, dtype=np.float32)
+    t = np.arange(int(note_s * sr)) / sr
+    env = np.minimum(1, t / 0.015) * np.exp(-t * 9)
+    for k, f in enumerate(freqs):
+        a = int(k * step_s * sr)
+        out[a:a + len(t)] += (level * np.sin(2 * np.pi * f * t) * env).astype(np.float32)
+    return out
+
+
+def markers(sr):
+    """Every slice: single soft 660 Hz bell. Every fifth: rising two-note chime."""
+    return bell(sr, [660]), bell(sr, [523, 784])
 
 
 def render_png(items, path, title):
@@ -62,11 +72,15 @@ def render_png(items, path, title):
 
 
 def render_wav(items, path):
-    parts, gap = [], click(WAV_SR)
-    for _, _, y, sr in items:
+    """slice, marker, 1 s silence; the marker after every 5th slice is the chime."""
+    parts = []
+    plain, fifth = markers(WAV_SR)
+    silence = np.zeros(WAV_SR, dtype=np.float32)
+    for i, _, y, sr in items:
         if sr != WAV_SR:
             y = librosa.resample(y, orig_sr=sr, target_sr=WAV_SR, res_type="soxr_hq")
-        parts += [y.astype(np.float32), gap]
+        parts += [y.astype(np.float32), np.zeros(int(0.15 * WAV_SR), dtype=np.float32),
+                  fifth if i % 5 == 0 else plain, silence]
     sf.write(path, np.concatenate(parts), WAV_SR, subtype="PCM_16")
 
 
@@ -76,6 +90,8 @@ def main():
     ap.add_argument("--filter", default="status==pending")
     ap.add_argument("--limit", type=int, default=0, help="max new sheets")
     ap.add_argument("--dry-run", action="store_true")
+    ap.add_argument("--rerender-wav", action="store_true",
+                    help="rebuild the WAV of every existing sheet, membership unchanged")
     args = ap.parse_args()
     if args.batch > GRID * GRID:
         raise SystemExit(f"contactsheet: --batch cannot exceed {GRID * GRID}")
@@ -88,6 +104,20 @@ def main():
 
     rows = list(csv.DictReader(MANIFEST.open(encoding="utf-8")))
     sheets = json.loads(SHEETS.read_text()) if SHEETS.exists() else {}
+    if args.rerender_wav:
+        by_id = {r["slice_id"]: r for r in rows}
+        names = list(sheets)[:args.limit] if args.limit else list(sheets)
+        for name in names:
+            if args.dry_run:
+                continue
+            items = []
+            for i, sid in enumerate(sheets[name], 1):
+                y, sr = sf.read(ROOT / by_id[sid]["slice_path"], dtype="float32")
+                items.append((i, by_id[sid], y, sr))
+            render_wav(items, REVIEW / f"{name}.wav")
+        tag = " [dry-run]" if args.dry_run else ""
+        print(f"contactsheet: re-rendered {len(names)} wavs{tag}")
+        return
     placed = {sid for ids in sheets.values() for sid in ids}
     todo = [r for r in rows if keep(r) and r["slice_id"] not in placed and r["role"]]
     todo.sort(key=lambda r: (r["tier"], r["role"], r["slice_id"]))
