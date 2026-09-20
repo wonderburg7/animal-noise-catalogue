@@ -19,6 +19,15 @@ slice:
                                # (a single-onset cricket buzz would otherwise vanish)
   snr_window_s: 1.5            # context either side of a slice for snr_db
 
+slice_long:                    # second pass: whole phrases, alongside the short one-shots
+  enabled: true
+  split_top_db: 30             # silence threshold for splitting, relative to file peak
+  merge_gap_s: 0.4             # intervals closer than this are joined into one phrase
+  min_dur_s: 1.0
+  max_dur_s: 20.0              # longer phrases are truncated
+  max_slices_per_file: 3       # highest-RMS phrases win
+  # gates (snr, clipping), padding, fades and normalisation come from `slice`
+
 classify:
   perc:    { max_dur_s: 0.35, min_onset_sharpness: 0.60 }
   tonal:   { min_tonal_ratio: 0.60, min_dur_s: 0.10, max_dur_s: 2.0, min_f0_conf: 0.50 }

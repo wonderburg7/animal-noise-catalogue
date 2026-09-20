@@ -40,6 +40,11 @@ def main():
     ap.add_argument("--sheet", type=int, help="sheet number; default first with pending slices")
     ap.add_argument("--reject", default="", help='indices to reject, e.g. "3,7,12-15"')
     ap.add_argument("--restore", default="", help="indices to set back to keep")
+    ap.add_argument("--bits", default="",
+                    help="one character per slice in sheet order: 1 keep, 0 reject "
+                         "(whitespace ignored, must match the sheet length exactly)")
+    ap.add_argument("--keep-char", default="1")
+    ap.add_argument("--reject-char", default="0")
     ap.add_argument("--dry-run", action="store_true")
     ap.add_argument("--limit", type=int, default=0, help="unused; accepted for contract")
     args = ap.parse_args()
@@ -64,6 +69,18 @@ def main():
     rej, res = parse_indices(args.reject, len(ids)), parse_indices(args.restore, len(ids))
     if rej & res:
         raise SystemExit("curate: an index cannot be in both --reject and --restore")
+    bits = "".join(args.bits.split())
+    if bits:
+        if rej or res:
+            raise SystemExit("curate: use --bits on its own, not with --reject/--restore")
+        if len(bits) != len(ids):
+            raise SystemExit(f"curate: {name} has {len(ids)} slices but --bits has {len(bits)} "
+                             "characters; nothing written")
+        stray = sorted(set(bits) - {args.keep_char, args.reject_char})
+        if stray:
+            raise SystemExit(f"curate: unexpected characters {stray} in --bits; nothing written")
+        rej = {i for i, c in enumerate(bits, 1) if c == args.reject_char}
+        res = {i for i, c in enumerate(bits, 1) if c == args.keep_char}
 
     rejected = restored = kept = 0
     for i, sid in enumerate(ids, 1):
@@ -79,8 +96,8 @@ def main():
         if (r["status"], r["reject_reason"]) != new:
             r["status"], r["reject_reason"] = new
             rejected += new[0] == "reject"
-            restored += i in res
-            kept += new[0] == "keep" and i not in res
+            restored += bool(i in res and not bits)
+            kept += new[0] == "keep" and not (i in res and not bits)
     if not args.dry_run:
         tmp = MANIFEST.with_suffix(".csv.tmp")
         with tmp.open("w", encoding="utf-8", newline="") as f:

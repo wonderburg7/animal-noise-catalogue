@@ -127,8 +127,10 @@ def fetch_pool(session, cfg, tier, qd, key):
             continue
         rec["_lic"], rec["_len"], rec["_smp"] = lic, length, smp
         out.append(rec)
-    out.sort(key=lambda x: (bool(x.get("also")) if cfg.get("prefer_no_also") else 0,
-                            x.get("q") or "Z", -x["_smp"]))
+    # quality (A best) outranks everything; then clean recordings (no `also`), then sample rate
+    out.sort(key=lambda x: (x.get("q") or "Z",
+                            bool(x.get("also")) if cfg.get("prefer_no_also") else 0,
+                            -x["_smp"]))
     return out, lic_skipped
 
 

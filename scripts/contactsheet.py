@@ -64,7 +64,8 @@ def render_png(items, path, title):
         mel = librosa.power_to_db(
             librosa.feature.melspectrogram(y=y, sr=sr, n_mels=64, fmax=sr / 2), ref=np.max)
         ax.imshow(mel, origin="lower", aspect="auto", cmap="magma", vmin=-70, vmax=0)
-        ax.set_title(f"{i}  {float(row['dur_s']):.2f}s  {row['role'] or '-'}", fontsize=9, pad=2)
+        ax.set_title(f"{i}  {float(row['dur_s']):.2f}s  {row['role'] or '-'}  {row.get('quality', '')}",
+                     fontsize=9, pad=2)
     fig.suptitle(title, fontsize=12)
     fig.tight_layout(rect=(0, 0, 1, 0.98))
     fig.savefig(path)
@@ -87,6 +88,8 @@ def render_wav(items, path):
 def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("--batch", type=int, default=64)
+    ap.add_argument("--batch-long", type=int, default=24,
+                    help="slices per sheet for long slices (they take longer to hear)")
     ap.add_argument("--filter", default="status==pending")
     ap.add_argument("--limit", type=int, default=0, help="max new sheets")
     ap.add_argument("--dry-run", action="store_true")
@@ -120,15 +123,16 @@ def main():
         return
     placed = {sid for ids in sheets.values() for sid in ids}
     todo = [r for r in rows if keep(r) and r["slice_id"] not in placed and r["role"]]
-    todo.sort(key=lambda r: (r["tier"], r["role"], r["slice_id"]))
+    todo.sort(key=lambda r: (r["tier"], r.get("kind") or "short", r["role"], r["slice_id"]))
 
     new_sheets, n_slices = 0, 0
-    for tier in ("clean", "sa"):
-        group = [r for r in todo if r["tier"] == tier]
-        for k in range(0, len(group), args.batch):
+    for tier, kind in [(t, k) for t in ("clean", "sa") for k in ("short", "long")]:
+        group = [r for r in todo if r["tier"] == tier and (r.get("kind") or "short") == kind]
+        size = args.batch_long if kind == "long" else args.batch
+        for k in range(0, len(group), size):
             if args.limit and new_sheets >= args.limit:
                 break
-            batch = group[k:k + args.batch]
+            batch = group[k:k + size]
             name = f"sheet_{len(sheets) + 1:03d}"
             new_sheets += 1
             n_slices += len(batch)
@@ -139,7 +143,8 @@ def main():
                 y, sr = sf.read(ROOT / r["slice_path"], dtype="float32")
                 items.append((i, r, y, sr))
             REVIEW.mkdir(exist_ok=True)
-            render_png(items, REVIEW / f"{name}.png", f"{name}  tier={tier}  {len(batch)} slices")
+            render_png(items, REVIEW / f"{name}.png",
+                       f"{name}  tier={tier}  {kind}  {len(batch)} slices")
             render_wav(items, REVIEW / f"{name}.wav")
             sheets[name] = [r["slice_id"] for r in batch]
             SHEETS.write_text(json.dumps(sheets, indent=1))
