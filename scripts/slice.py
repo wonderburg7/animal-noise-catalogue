@@ -11,6 +11,8 @@ import argparse
 import csv
 import json
 import logging
+import re
+import unicodedata
 from collections import Counter
 from pathlib import Path
 
@@ -180,6 +182,40 @@ def ensure_columns(quality_by_id):
         w.writerows(rows)
 
 
+def slug(text):
+    """'Dendrocopos major' -> 'dendrocopos-major' (lowercase ASCII, hyphens)."""
+    s = unicodedata.normalize("NFKD", text).encode("ascii", "ignore").decode()
+    return re.sub(r"[^a-z0-9]+", "-", s.lower()).strip("-") or "unknown"
+
+
+def slice_rel(species_sci, slice_id):
+    return f"data/slices/{slug(species_sci)}_{slice_id}.wav"
+
+
+def rename_existing():
+    """Give already-written slice files species names. Idempotent."""
+    if not MANIFEST.exists():
+        return 0
+    with MANIFEST.open(encoding="utf-8", newline="") as f:
+        reader = csv.DictReader(f)
+        cols, rows = reader.fieldnames, list(reader)
+    moved = 0
+    for r in rows:
+        want = slice_rel(r["species_sci"], r["slice_id"])
+        if r["slice_path"] != want and (ROOT / r["slice_path"]).exists():
+            (ROOT / r["slice_path"]).replace(ROOT / want)
+            r["slice_path"] = want
+            moved += 1
+    if moved:
+        tmp = MANIFEST.with_suffix(".csv.tmp")
+        with tmp.open("w", encoding="utf-8", newline="") as f:
+            w = csv.DictWriter(f, fieldnames=cols)
+            w.writeheader()
+            w.writerows(rows)
+        tmp.replace(MANIFEST)
+    return moved
+
+
 def make_row(r, kind, slice_id, rel, ultra, audio, sr_out, snr, rms):
     return {
         "slice_id": slice_id, "tier": r["tier"], "source": r["source"],
@@ -210,6 +246,7 @@ def main():
     raws = list(csv.DictReader(RAW_MANIFEST.open(encoding="utf-8")))
     if not args.dry_run:
         ensure_columns({r["source_id"]: r["quality"] for r in raws})
+        rename_existing()
     if args.tier != "both":
         raws = [r for r in raws if r["tier"] == args.tier]
     state = json.loads(STATE.read_text()) if STATE.exists() else {}
@@ -248,7 +285,7 @@ def main():
             prefix = "L" if kind == "long" else ""
             for n, (_, audio, snr, rms) in enumerate(kept, 1):
                 slice_id = f"xc{sid}_{prefix}{n:0{width}d}"
-                rel = f"data/slices/{slice_id}.wav"
+                rel = slice_rel(r["species_sci"], slice_id)
                 if not args.dry_run:
                     SLICE_DIR.mkdir(parents=True, exist_ok=True)
                     sf.write(ROOT / rel, audio, sr_out, subtype="PCM_24")
