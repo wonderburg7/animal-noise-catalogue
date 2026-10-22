@@ -1,0 +1,80 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Sample Review</title>
+<link rel="stylesheet" href="/static/app.css">
+</head>
+<body>
+<header class="bar">
+  <span class="brand">Sample Review</span>
+  <span id="progress" class="muted"></span>
+  <span id="dryrun" class="badge warn" hidden>dry run: nothing is saved</span>
+  <span class="spacer"></span>
+  <button id="settingsBtn" type="button" title="Key bindings">Keys</button>
+  <button id="finishBtn" type="button" title="Stop the review server">Finish</button>
+</header>
+
+<main>
+  <section class="species">
+    <h1><span id="speciesEn">Loading…</span> <em id="speciesSci"></em></h1>
+    <p id="meta" class="muted"></p>
+  </section>
+
+  <section class="wave">
+    <div class="lane-label">Whole file <span id="time" class="muted mono"></span></div>
+    <canvas id="overview"></canvas>
+    <div class="lane-label">Around this slice <span class="muted">(scroll to zoom; drag edges when editing)</span></div>
+    <canvas id="detail"></canvas>
+    <div class="legend muted">
+      <span><i class="sw pending"></i>pending</span>
+      <span><i class="sw keep"></i>keep</span>
+      <span><i class="sw reject"></i>reject</span>
+      <span><i class="sw maybe"></i>maybe</span>
+      <span>top lane: short slices · bottom lane: long phrases</span>
+    </div>
+  </section>
+
+  <section class="current">
+    <div id="sliceInfo" class="mono"></div>
+    <div id="editNote" class="badge edit" hidden>Editing edges: drag the handles, then accept or maybe to save. Esc cancels.</div>
+  </section>
+
+  <section id="keymap" class="keymap"></section>
+</main>
+
+<div id="tooltip" class="tooltip" hidden></div>
+<div id="toast" class="toast" hidden></div>
+
+<div id="start" class="overlay">
+  <div class="card">
+    <h2>Ready</h2>
+    <p>Click or press any key to start playback.</p>
+  </div>
+</div>
+
+<div id="done" class="overlay" hidden>
+  <div class="card">
+    <h2 id="doneTitle">All files reviewed</h2>
+    <p id="doneText">Press Finish to stop the server and see the summary in the terminal.</p>
+  </div>
+</div>
+
+<dialog id="settings">
+  <form method="dialog">
+    <h2>Key bindings</h2>
+    <p class="muted">Click a key, then press the new one.</p>
+    <div id="bindings"></div>
+    <p id="bindMsg" class="err"></p>
+    <div class="row">
+      <button id="resetKeys" type="button">Reset to defaults</button>
+      <span class="spacer"></span>
+      <button value="close">Close</button>
+    </div>
+  </form>
+</dialog>
+
+<script src="/static/app.js"></script>
+</body>
+</html>

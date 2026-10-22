@@ -6,13 +6,15 @@ Two kinds of slice per recording:
 
 Ultrasonic files (native sr > ultrasonic.detect_smp_above) are never resampled:
 the header is reinterpreted so the samples play back slower and lower.
+
+start_s / end_s place each slice on the prepared timeline of its source (after
+resample and high-pass; for ultrasonic files, the slowed playback timeline).
+`--backfill-times` fills them for rows sliced before they were recorded.
 """
 import argparse
 import csv
 import json
 import logging
-import re
-import unicodedata
 from collections import Counter
 from pathlib import Path
 
@@ -21,6 +23,8 @@ import numpy as np
 import scipy.signal
 import soundfile as sf
 import yaml
+
+from naming import slug
 
 ROOT = Path(__file__).resolve().parent.parent
 RAW_MANIFEST = ROOT / "data" / "raw_manifest.csv"
@@ -31,11 +35,14 @@ STATE = ROOT / "data" / "state" / "slice.json"
 MANIFEST_COLS = [
     "slice_id", "tier", "source", "source_id", "source_url", "recordist", "licence",
     "licence_url", "species_sci", "species_en", "grp", "call_type", "role_hint", "role",
-    "kind", "quality", "file", "slice_path", "ultrasonic", "dur_s", "peak_db", "rms_db",
+    "kind", "quality", "file", "slice_path", "ultrasonic", "start_s", "end_s", "edited",
+    "dur_s", "peak_db", "rms_db",
     "centroid_hz", "f0_hz", "f0_conf", "midi_note", "cents_off", "tonal_ratio",
     "onset_sharpness", "snr_db", "status", "reject_reason",
 ]
 FRAME, HOP_RMS = 2048, 512
+FEATURE_COLS = ["centroid_hz", "f0_hz", "f0_conf", "midi_note", "cents_off", "tonal_ratio",
+                "onset_sharpness"]
 
 log = logging.getLogger("slice")
 
@@ -77,30 +84,46 @@ def prepare(y, sr, cfg):
     return y, target, p, False
 
 
-def finish(y, sr, s, e, p, frames_db, rejects):
-    """Gate, pad, fade and normalise y[s:e]. Return (start_s, audio, snr, rms) or None."""
-    pad = int(p["pad_s"] * sr)
+def shape(audio, sr, p):
+    """Fade in/out and peak-normalise in place. Same processing for every cut."""
     fade = int(p["fade_ms"] / 1000 * sr)
-    win = int(p["snr_window_s"] * sr)
-    w = frames_db[max(0, (s - win) // HOP_RMS): (e + win) // HOP_RMS + 1]
-    snr = float(np.percentile(w, 90) - np.percentile(w, 10)) if len(w) else 0.0
-    if snr < p["min_snr_db"]:
-        rejects["low_snr"] += 1
-        return None
-    audio = y[max(0, s - pad): min(len(y), e + pad)].copy()
-    if np.mean(np.abs(audio) >= 0.999) > p["max_clip_ratio"]:
-        rejects["clipped"] += 1
-        return None
-    if float(np.max(np.abs(audio))) <= 0:
-        rejects["silent"] += 1
-        return None
     n = min(fade, len(audio) // 4)
     if n > 0:
         ramp = np.linspace(0, 1, n, dtype=np.float32)
         audio[:n] *= ramp
         audio[-n:] *= ramp[::-1]
     audio *= 10 ** (p["peak_dbfs"] / 20) / float(np.max(np.abs(audio)))
-    return s / sr, audio, snr, float(np.sqrt(np.mean(audio ** 2)))
+    return audio
+
+
+def snr_at(frames_db, s, e, sr, p):
+    """90th minus 10th percentile frame RMS (dB) over y[s:e] plus context either side."""
+    win = int(p["snr_window_s"] * sr)
+    w = frames_db[max(0, (s - win) // HOP_RMS): (e + win) // HOP_RMS + 1]
+    return float(np.percentile(w, 90) - np.percentile(w, 10)) if len(w) else 0.0
+
+
+def finish(y, sr, s, e, p, frames_db, rejects):
+    """Gate, pad, fade and normalise y[s:e].
+
+    Return (onset_s, audio, snr, rms, (start_s, end_s)) or None, where start_s/end_s
+    are the padded bounds actually cut.
+    """
+    pad = int(p["pad_s"] * sr)
+    snr = snr_at(frames_db, s, e, sr, p)
+    if snr < p["min_snr_db"]:
+        rejects["low_snr"] += 1
+        return None
+    a, b = max(0, s - pad), min(len(y), e + pad)
+    audio = y[a:b].copy()
+    if np.mean(np.abs(audio) >= 0.999) > p["max_clip_ratio"]:
+        rejects["clipped"] += 1
+        return None
+    if float(np.max(np.abs(audio))) <= 0:
+        rejects["silent"] += 1
+        return None
+    shape(audio, sr, p)
+    return s / sr, audio, snr, float(np.sqrt(np.mean(audio ** 2))), (a / sr, b / sr)
 
 
 def cap_per_file(cands, limit, rejects):
@@ -176,16 +199,11 @@ def ensure_columns(quality_by_id):
     for r in rows:
         r.setdefault("kind", "short")
         r.setdefault("quality", quality_by_id.get(r["source_id"], ""))
+        r.setdefault("edited", "False")
     with MANIFEST.open("w", encoding="utf-8", newline="") as f:
         w = csv.DictWriter(f, fieldnames=MANIFEST_COLS)
         w.writeheader()
         w.writerows(rows)
-
-
-def slug(text):
-    """'Dendrocopos major' -> 'dendrocopos-major' (lowercase ASCII, hyphens)."""
-    s = unicodedata.normalize("NFKD", text).encode("ascii", "ignore").decode()
-    return re.sub(r"[^a-z0-9]+", "-", s.lower()).strip("-") or "unknown"
 
 
 def slice_rel(species_sci, slice_id):
@@ -216,7 +234,81 @@ def rename_existing():
     return moved
 
 
-def make_row(r, kind, slice_id, rel, ultra, audio, sr_out, snr, rms):
+def read_manifest():
+    with MANIFEST.open(encoding="utf-8", newline="") as f:
+        reader = csv.DictReader(f)
+        return reader.fieldnames, list(reader)
+
+
+def write_manifest(cols, rows):
+    tmp = MANIFEST.with_suffix(".csv.tmp")
+    with tmp.open("w", encoding="utf-8", newline="") as f:
+        w = csv.DictWriter(f, fieldnames=cols)
+        w.writeheader()
+        w.writerows(rows)
+    tmp.replace(MANIFEST)
+
+
+def cut_source(r, cfg, kinds):
+    """Re-run slicing on one raw recording. Yield (kind, slice_id, audio, sr_out, bounds)."""
+    y, sr = load_audio(ROOT / r["file"])
+    y, sr_out, p, _ = prepare(y, sr, cfg)
+    for kind in kinds:
+        kept = (slice_short(y, sr_out, p) if kind == "short"
+                else slice_long(y, sr_out, p, cfg["slice_long"]))[0]
+        width = max(2, len(str(len(kept))))
+        prefix = "L" if kind == "long" else ""
+        for n, (_, audio, _, _, bounds) in enumerate(kept, 1):
+            yield kind, f"xc{r['source_id']}_{prefix}{n:0{width}d}", audio, sr_out, bounds
+
+
+def backfill_times(cfg, tier, limit, dry_run):
+    """Fill start_s/end_s for rows sliced before they were recorded. Matches by slice id
+    and accepts only when the re-cut duration equals the stored dur_s."""
+    raws = {r["source_id"]: r for r in csv.DictReader(RAW_MANIFEST.open(encoding="utf-8"))}
+    if not dry_run:
+        ensure_columns({k: r["quality"] for k, r in raws.items()})
+    cols, rows = read_manifest()
+    todo = {}
+    for row in rows:
+        if row.get("start_s") or row.get("edited") == "True":
+            continue
+        if tier != "both" and row["tier"] != tier:
+            continue
+        todo.setdefault(row["source_id"], {})[row["slice_id"]] = row
+    files = matched = unmatched = failed = 0
+    for sid, want in todo.items():
+        if limit and files >= limit:
+            break
+        files += 1
+        kinds = sorted({w["kind"] for w in want.values()}, reverse=True)  # short, long
+        try:
+            for kind, slice_id, audio, sr_out, (t0, t1) in cut_source(raws[sid], cfg, kinds):
+                row = want.pop(slice_id, None)
+                if row is None:
+                    continue
+                if round(len(audio) / sr_out, 4) != float(row["dur_s"]):
+                    unmatched += 1
+                    log.info("backfill %s: dur %s != %s", slice_id,
+                             round(len(audio) / sr_out, 4), row["dur_s"])
+                    continue
+                row["start_s"], row["end_s"] = round(t0, 4), round(t1, 4)
+                matched += 1
+        except Exception:
+            failed += 1
+            log.exception("backfill failed %s", sid)
+            continue
+        unmatched += len(want)
+        for slice_id in want:
+            log.info("backfill %s: no slice with that id on re-cut", slice_id)
+    if not dry_run and matched:
+        write_manifest(cols, rows)
+    tag = " [dry-run]" if dry_run else ""
+    print(f"slice --backfill-times: {files} files, {matched} matched, {unmatched} unmatched, "
+          f"{failed} failed{tag}")
+
+
+def make_row(r, kind, slice_id, rel, ultra, audio, sr_out, snr, rms, bounds):
     return {
         "slice_id": slice_id, "tier": r["tier"], "source": r["source"],
         "source_id": r["source_id"], "source_url": r["source_url"],
@@ -224,7 +316,8 @@ def make_row(r, kind, slice_id, rel, ultra, audio, sr_out, snr, rms):
         "licence_url": r["licence_url"], "species_sci": r["species_sci"],
         "species_en": r["species_en"], "grp": r["grp"], "call_type": r["call_type"],
         "role_hint": r["role_hint"], "kind": kind, "quality": r["quality"],
-        "slice_path": rel, "ultrasonic": ultra, "dur_s": round(len(audio) / sr_out, 4),
+        "slice_path": rel, "ultrasonic": ultra, "start_s": round(bounds[0], 4),
+        "end_s": round(bounds[1], 4), "edited": False, "dur_s": round(len(audio) / sr_out, 4),
         "peak_db": round(db(float(np.max(np.abs(audio)))), 2),
         "rms_db": round(db(rms), 2), "snr_db": round(snr, 2), "status": "pending",
     }
@@ -235,12 +328,17 @@ def main():
     ap.add_argument("--tier", choices=["clean", "sa", "both"], default="both")
     ap.add_argument("--limit", type=int, default=0, help="max raw files to process")
     ap.add_argument("--dry-run", action="store_true")
+    ap.add_argument("--backfill-times", action="store_true",
+                    help="fill start_s/end_s on existing rows; slices nothing new")
     args = ap.parse_args()
 
     (ROOT / "data" / "logs").mkdir(parents=True, exist_ok=True)
     logging.basicConfig(filename=ROOT / "data" / "logs" / "slice.log",
                         level=logging.INFO, format="%(asctime)s %(message)s")
     cfg = yaml.safe_load((ROOT / "config" / "rules.yaml").read_text())
+    if args.backfill_times:
+        backfill_times(cfg, args.tier, args.limit, args.dry_run)
+        return
     lp = cfg.get("slice_long", {})
     do_long = bool(lp.get("enabled"))
     raws = list(csv.DictReader(RAW_MANIFEST.open(encoding="utf-8")))
@@ -283,13 +381,14 @@ def main():
                      len(kept), dict(rej))
             width = max(2, len(str(len(kept))))
             prefix = "L" if kind == "long" else ""
-            for n, (_, audio, snr, rms) in enumerate(kept, 1):
+            for n, (_, audio, snr, rms, bounds) in enumerate(kept, 1):
                 slice_id = f"xc{sid}_{prefix}{n:0{width}d}"
                 rel = slice_rel(r["species_sci"], slice_id)
                 if not args.dry_run:
                     SLICE_DIR.mkdir(parents=True, exist_ok=True)
                     sf.write(ROOT / rel, audio, sr_out, subtype="PCM_24")
-                rows.append(make_row(r, kind, slice_id, rel, ultra, audio, sr_out, snr, rms))
+                rows.append(make_row(r, kind, slice_id, rel, ultra, audio, sr_out, snr, rms,
+                                    bounds))
             counts[kind] += len(kept)
             entry = state.setdefault(sid, {})
             if kind == "short":

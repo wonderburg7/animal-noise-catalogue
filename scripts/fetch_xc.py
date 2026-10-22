@@ -13,6 +13,8 @@ import requests
 import yaml
 from dotenv import load_dotenv
 
+from naming import slug
+
 ROOT = Path(__file__).resolve().parent.parent
 API = "https://xeno-canto.org/api/3/recordings"
 USER_AGENT = "animal-noise-catalogue/0.1 (personal sample-library research; contact: wonderburg7@gmail.com)"
@@ -181,9 +183,51 @@ def download(session, rec):
             f.write(first)
             for chunk in it:
                 f.write(chunk)
-    dest = RAW_DIR / f"XC{rec['id']}.{ext}"
+    dest = RAW_DIR / raw_name(f"{rec.get('gen', '')} {rec.get('sp', '')}", rec["id"], ext)
     tmp.replace(dest)
     return dest
+
+
+def raw_name(species_sci, sid, ext):
+    """'Dendrocopos major', 1175420, 'mp3' -> 'dendrocopos-major_XC1175420.mp3'."""
+    return f"{slug(species_sci)}_XC{sid}.{ext}"
+
+
+def rename_existing(dry_run, limit):
+    """Give already-downloaded originals species names; update raw manifest and state."""
+    with RAW_MANIFEST.open(encoding="utf-8", newline="") as f:
+        reader = csv.DictReader(f)
+        cols, rows = reader.fieldnames, list(reader)
+    state = json.loads(STATE.read_text()) if STATE.exists() else {}
+    moved = missing = 0
+    for r in rows:
+        old = ROOT / r["file"]
+        want = (old.parent / raw_name(r["species_sci"], r["source_id"],
+                                      old.suffix.lstrip("."))).relative_to(ROOT).as_posix()
+        if r["file"] == want:
+            continue
+        if limit and moved >= limit:
+            break
+        if not old.exists():
+            missing += 1
+            log.warning("rename: %s missing", r["file"])
+            continue
+        if not dry_run:
+            old.replace(ROOT / want)
+        r["file"] = want
+        if r["source_id"] in state:
+            state[r["source_id"]]["file"] = want
+        moved += 1
+    if not dry_run and moved:
+        tmp = RAW_MANIFEST.with_suffix(".csv.tmp")
+        with tmp.open("w", encoding="utf-8", newline="") as f:
+            w = csv.DictWriter(f, fieldnames=cols)
+            w.writeheader()
+            w.writerows(rows)
+        tmp.replace(RAW_MANIFEST)
+        STATE.write_text(json.dumps(state, indent=1))
+    tag = " [dry-run]" if dry_run else ""
+    print(f"fetch_xc --rename-existing: {moved} renamed, {missing} missing{tag}")
 
 
 def run_fetch(cfg, tier, limit, dry_run, key):
@@ -258,11 +302,16 @@ def main():
     ap.add_argument("--tier", choices=["clean", "sa", "both"], default="both")
     ap.add_argument("--limit", type=int, default=0)
     ap.add_argument("--dry-run", action="store_true")
+    ap.add_argument("--rename-existing", action="store_true",
+                    help="add species names to already-downloaded originals; no network")
     args = ap.parse_args()
 
     (ROOT / "data" / "logs").mkdir(parents=True, exist_ok=True)
     logging.basicConfig(filename=ROOT / "data" / "logs" / "fetch_xc.log",
                         level=logging.INFO, format="%(asctime)s %(message)s")
+    if args.rename_existing:
+        rename_existing(args.dry_run, args.limit)
+        return
     if not args.probe and args.tier == "both":
         sys.exit("fetch_xc: downloads need an explicit --tier clean|sa")
 

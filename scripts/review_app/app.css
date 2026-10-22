@@ -1,0 +1,78 @@
+:root {
+  --bg: #f7f7f5; --panel: #ffffff; --fg: #1d1d1b; --muted: #6b6b66; --line: #d9d9d4;
+  --wave: #4a5a6a; --wave-dim: #b9c1c9; --playhead: #e0522d; --select: #1d1d1b;
+  --pending: #9a9a94; --keep: #2f9e5b; --reject: #d2453c; --maybe: #e3a21a;
+  --edit: #2a6fdb; --warn-bg: #fff2d6; --warn-fg: #7a5200;
+}
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) {
+    --bg: #161615; --panel: #1f1f1d; --fg: #ececea; --muted: #a2a29c; --line: #3a3a37;
+    --wave: #a9bccc; --wave-dim: #4a525a; --playhead: #ff7a52; --select: #ffffff;
+    --pending: #8a8a84; --keep: #4cc27d; --reject: #f06a60; --maybe: #f2bb3d;
+    --edit: #6aa1ff; --warn-bg: #3d3014; --warn-fg: #f2d49a;
+  }
+}
+* { box-sizing: border-box; }
+body { margin: 0; background: var(--bg); color: var(--fg);
+  font: 15px/1.45 system-ui, -apple-system, "Segoe UI", sans-serif; }
+.mono { font-family: ui-monospace, "Cascadia Mono", Consolas, monospace; font-size: 13px; }
+.muted { color: var(--muted); }
+.err { color: var(--reject); min-height: 1.4em; }
+.spacer { flex: 1; }
+a { color: inherit; }
+
+.bar { display: flex; gap: 14px; align-items: center; padding: 10px 20px;
+  border-bottom: 1px solid var(--line); background: var(--panel); }
+.brand { font-weight: 600; }
+button { font: inherit; color: var(--fg); background: var(--panel); border: 1px solid var(--line);
+  border-radius: 6px; padding: 5px 12px; cursor: pointer; }
+button:hover { border-color: var(--muted); }
+
+main { max-width: 1400px; margin: 0 auto; padding: 16px 20px 40px; }
+.species h1 { margin: 4px 0 2px; font-size: 26px; font-weight: 600; }
+.species h1 em { font-weight: 400; color: var(--muted); }
+.species p { margin: 0 0 12px; }
+
+.wave { background: var(--panel); border: 1px solid var(--line); border-radius: 8px; padding: 10px 12px; }
+.lane-label { font-size: 13px; margin: 4px 0; display: flex; gap: 10px; }
+canvas { display: block; width: 100%; cursor: crosshair; }
+#detail { margin-bottom: 6px; }
+.legend { display: flex; flex-wrap: wrap; gap: 14px; font-size: 12px; }
+.sw { display: inline-block; width: 10px; height: 10px; border-radius: 2px; margin-right: 5px; vertical-align: -1px; }
+.sw.pending { background: var(--pending); } .sw.keep { background: var(--keep); }
+.sw.reject { background: var(--reject); } .sw.maybe { background: var(--maybe); }
+
+.current { display: flex; gap: 14px; align-items: center; flex-wrap: wrap; margin: 12px 0; min-height: 30px; }
+.badge { border-radius: 999px; padding: 3px 10px; font-size: 13px; }
+.badge.warn { background: var(--warn-bg); color: var(--warn-fg); }
+.badge.edit { background: var(--edit); color: #fff; }
+.badge[hidden] { display: none; }
+
+.keymap { display: grid; grid-template-columns: repeat(auto-fill, minmax(230px, 1fr)); gap: 8px; }
+.keymap div { background: var(--panel); border: 1px solid var(--line); border-radius: 6px;
+  padding: 6px 10px; display: flex; gap: 10px; align-items: center; }
+kbd { font-family: ui-monospace, Consolas, monospace; font-size: 12px; min-width: 26px; text-align: center;
+  border: 1px solid var(--line); border-bottom-width: 2px; border-radius: 4px; padding: 1px 6px; background: var(--bg); }
+
+.tooltip { position: fixed; pointer-events: none; background: var(--fg); color: var(--bg);
+  font-size: 12px; padding: 4px 8px; border-radius: 4px; white-space: nowrap; z-index: 5; }
+.toast { position: fixed; bottom: 20px; left: 50%; transform: translateX(-50%); background: var(--fg);
+  color: var(--bg); padding: 8px 14px; border-radius: 6px; z-index: 6; }
+.tooltip[hidden], .toast[hidden], .overlay[hidden] { display: none; }
+
+.overlay { position: fixed; inset: 0; background: rgb(0 0 0 / 0.45); display: grid; place-items: center; z-index: 10; }
+.card { background: var(--panel); border-radius: 10px; padding: 24px 32px; max-width: 420px; }
+.card h2 { margin-top: 0; }
+
+dialog { background: var(--panel); color: var(--fg); border: 1px solid var(--line); border-radius: 10px;
+  width: min(480px, calc(100vw - 32px)); }
+dialog::backdrop { background: rgb(0 0 0 / 0.45); }
+dialog h2 { margin-top: 0; }
+#bindings { display: grid; grid-template-columns: 1fr auto; gap: 6px 12px; align-items: center; }
+#bindings button.listening { border-color: var(--edit); color: var(--edit); }
+.row { display: flex; gap: 8px; margin-top: 10px; }
+
+@media (max-width: 640px) {
+  main { padding: 12px 16px 32px; }
+  .species h1 { font-size: 21px; }
+}
