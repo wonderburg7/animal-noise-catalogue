@@ -1,0 +1,10 @@
+accept: a
+decline: d
+maybe: s
+edit: e
+prev: ArrowLeft
+next: ArrowRight
+next_file: n
+replay: Space
+play_file: p
+cancel: Escape

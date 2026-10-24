@@ -1,7 +1,7 @@
 # Animal Noise Catalogue
 
 Pipeline: fetch animal recordings -> slice into one-shots -> analyse ->
-classify by rule -> human review via contact sheets -> export for Strudel
+classify by rule -> human review in the review app -> export for Strudel
 and SFZ.
 
 ## Hard rules
@@ -21,14 +21,18 @@ and SFZ.
   `source_url` through to export. `ATTRIBUTION.md` is generated, not
   written by hand.
 - Export format is 44.1 kHz, 16-bit, mono WAV.
+- Review decisions (`keep`, `reject`, `maybe`) are made by the user in
+  `scripts/review.py`. Keys live in `config/review_keys.yaml`.
 
 ## Commands
 
     python scripts/build.py --stage fetch --limit 5
     python scripts/build.py --stage slice
     python scripts/build.py --stage analyse
-    python scripts/build.py --stage contactsheet --batch 64
-    python scripts/curate.py --reject "3,7,12-15"
+    python scripts/slice.py --backfill-times        # once: start_s/end_s for older slices
+    python scripts/fetch_xc.py --rename-existing    # once: species names on raw files
+    python scripts/review.py                        # review app, one key per slice
+    python scripts/review.py --filter status==maybe # revisit the maybe pile
     python scripts/build.py --stage export
 
 ## Stack
